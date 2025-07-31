@@ -1,53 +1,87 @@
-.DS_Store
-.vscode
-*.dSYM
+# Build outputs
+pogocache
+pogocache-sani
 *.o
 *.a
-*.db
-*.work
-*.tmp
-*.test
 *.out
+*.dSYM
+gitinfo.h
+*.test
 *.data
 *.profraw
 *.profdata
 a.out
+test
+data/
+
+# Dependencies
+deps/openssl/
+deps/liburing/
+deps/*.tar.gz
+
+# Development and AI assistance files (keep locally, exclude from production)
+.claude/
+.roo/
+.hive-mind/
+.swarm/
+.roomodes
+coordination/
+memory/
+CLAUDE.md
+claude-flow*
+.mcp.json
+
+# Development documentation (keep locally)
+BUILD_SYSTEM_SUMMARY.md
+PHASE1_VALIDATION_REPORT.md
+build-architecture.md
+build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Security files
 *.pem
 *.key
-*.rdb
 *.crt
 *.cer
 *.csr
 *.srl
 *.sock
-test
-pogocache-start.sh
-pogocache
-pogocache-sani
-data/
 
-
-# Claude Flow generated files
-.claude/settings.local.json
-.mcp.json
-claude-flow.config.json
-.swarm/
-.hive-mind/
-memory/claude-flow-data.json
-memory/sessions/*
-!memory/sessions/README.md
-memory/agents/*
-!memory/agents/README.md
-coordination/memory_bank/*
-coordination/subtasks/*
-coordination/orchestration/*
+# Database files
 *.db
 *.db-journal
 *.db-wal
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
-claude-flow
-claude-flow.bat
-claude-flow.ps1
+*.work
+*.rdb
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
 hive-mind-prompt-*.txt
+
+# Test outputs
+test_results/
+coverage/
+
+# Cache files
+.cache/
+*.cache
