@@ -11,6 +11,7 @@
 #define CONN_H
 
 #include <stdio.h>
+#include <unistd.h>  // For ssize_t  
 #include "net.h"
 
 #define PROTO_MEMCACHE 1

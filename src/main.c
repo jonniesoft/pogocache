@@ -34,6 +34,7 @@
 #include "pogocache.h"
 #include "gitinfo.h"
 #include "uring.h"
+#include "performance_tuning.h"
 
 // default user flags
 int nthreads = 0;             // number of client threads
@@ -46,8 +47,8 @@ char *tcpnodelay = "yes";     // disable nagle's algorithm
 char *quickack = "no";        // enable quick acks
 char *usecas = "no";          // enable compare and store
 char *keepalive = "yes";      // socket keepalive setting
-int backlog = 1024;           // network socket accept backlog
-int queuesize = 128;          // event queue size
+int backlog = 0;              // network socket accept backlog (0 = auto-optimize)
+int queuesize = 0;            // event queue size (0 = auto-optimize)
 char *maxmemory = "80%";      // Maximum memory allowed - 80% total system
 char *evict = "yes";          // evict keys when maxmemory reached
 int loadfactor = 75;          // hashmap load factor
@@ -59,9 +60,10 @@ char *tlscertfile = "";       // tls cert file
 char *tlskeyfile = "";        // tls key file
 char *tlscacertfile = "";     // tls ca cert file
 char *uring = "yes";          // use uring (linux only)
-int maxconns = 1024;          // maximum number of sockets
+int maxconns = 0;             // maximum number of sockets (0 = auto-optimize)
 char *noticker = "no";
 char *warmup = "yes";
+char *autotune = "yes";       // enable automatic performance tuning
 
 // Global variables calculated in main().
 // These should never change during the lifetime of the process.
@@ -148,7 +150,7 @@ static void showhelp(FILE *file) {
     HOPT("--maxmemory value", "set max memory usage", "%s", maxmemory);
     HOPT("--evict yes/no", "evict keys at maxmemory", "%s", evict);
     HOPT("--persist path", "persistence file", "%s", *persist?persist:"none");
-    HOPT("--maxconns conns", "maximum connections", "%d", maxconns);
+    HOPT("--maxconns conns", "maximum connections", "%s", maxconns==0?"auto":"custom");
     HELP("\n");
     
     HELP("Security options:\n");
@@ -163,8 +165,9 @@ static void showhelp(FILE *file) {
 
     HELP("Advanced options:\n");
     HOPT("--shards count", "number of shards", "%d", nshards);
-    HOPT("--backlog count", "accept backlog", "%d", backlog);
-    HOPT("--queuesize count", "event queuesize size", "%d", queuesize);
+    HOPT("--backlog count", "accept backlog", "%s", backlog==0?"auto":"custom");
+    HOPT("--queuesize count", "event queuesize size", "%s", queuesize==0?"auto":"custom");
+    HOPT("--autotune yes/no", "enable auto performance tuning", "%s", autotune);
     HOPT("--reuseport yes/no", "reuseport for tcp", "%s", reuseport);
     HOPT("--tcpnodelay yes/no", "disable nagle's algo", "%s", tcpnodelay);
     HOPT("--quickack yes/no", "use quickack (linux)", "%s", quickack);
@@ -476,6 +479,7 @@ int main(int argc, char *argv[]) {
             AFLAG("persist", persist = flag)
             AFLAG("noticker", noticker = flag)
             AFLAG("warmup", warmup = flag)
+            AFLAG("autotune", autotune = flag)
 #ifndef NOOPENSSL
             // TLS flags
             AFLAG("tlsport", tlsport = flag)
@@ -546,8 +550,44 @@ int main(int argc, char *argv[]) {
         INVALID_FLAG("usecas", usecas);
     }
 
-    if (maxconns <= 0) {
-        maxconns = 1024;
+    // Auto-tune performance parameters if enabled
+    bool useautotune;
+    if (strcmp(autotune, "yes") == 0) {
+        useautotune = true;
+    } else if (strcmp(autotune, "no") == 0) {
+        useautotune = false;
+    } else {
+        INVALID_FLAG("autotune", autotune);
+    }
+    
+    struct perf_config *perfconfig = NULL;
+    if (useautotune) {
+        perfconfig = perf_optimize_defaults();
+        
+        // Apply auto-tuned values if not explicitly set by user
+        if (backlog == 0) {
+            backlog = perfconfig->optimal_backlog;
+        }
+        if (queuesize == 0) {
+            queuesize = perfconfig->optimal_queuesize;
+        }
+        if (maxconns == 0) {
+            maxconns = perfconfig->optimal_maxconns;
+        }
+        if (nshards == 0) {
+            nshards = perfconfig->optimal_nshards;
+        }
+    } else {
+        // Use improved defaults if auto-tuning disabled
+        // These values provide better out-of-the-box performance for modern systems
+        if (backlog == 0) backlog = 2048;    // Increased from 1024 for higher concurrency
+        if (queuesize == 0) queuesize = 512;  // Increased from 128 for better throughput
+        if (maxconns == 0) maxconns = 4096;   // Increased from 1024 for modern workloads
+    }
+    
+    // Validate final configuration
+    if (!perf_validate_config(backlog, queuesize, maxconns, nshards > 0 ? nshards : 4096)) {
+        printf("# Warning: Performance parameters may not be optimal for this system\n");
     }
 
 
@@ -611,12 +651,13 @@ int main(int argc, char *argv[]) {
         printf("# loadfactor maximum set to %d\n", MAXLOADFACTOR_RH);
     }
 
-    if (queuesize < 1) {
-        queuesize = 1;
-        printf("# queuesize adjusted to 1\n");
-    } else if (queuesize > 4096) {
-        queuesize = 4096;
-        printf("# queuesize adjusted to 4096\n");
+    // Enhanced queuesize validation with performance tuning bounds
+    if (queuesize < PERF_MIN_QUEUESIZE) {
+        queuesize = PERF_MIN_QUEUESIZE;
+        printf("# queuesize adjusted to %d (minimum)\n", PERF_MIN_QUEUESIZE);
+    } else if (queuesize > PERF_MAX_QUEUESIZE) {
+        queuesize = PERF_MAX_QUEUESIZE;
+        printf("# queuesize adjusted to %d (maximum)\n", PERF_MAX_QUEUESIZE);
     }
 
     if (maxmemorymb) {
@@ -697,6 +738,12 @@ int main(int argc, char *argv[]) {
         tcpnodelay, keepalive, quickack);
     printf("* Threads (threads: %d, queuesize: %d)\n", nthreads, queuesize);
     printf("* Shards (shards: %d, loadfactor: %d%%)\n", nshards, loadfactor);
+    printf("* Performance (autotune: %s)\n", autotune);
+    
+    // Print performance tuning summary if auto-tuning was used
+    if (useautotune && perfconfig) {
+        perf_print_recommendations(perfconfig);
+    }
     printf("* Security (auth: %s, tlsport: %s)\n", 
         strlen(auth)>0?"enabled":"disabled", *tlsport?tlsport:"none");
     if (strcmp(noticker,"yes") == 0) {
@@ -742,6 +789,12 @@ int main(int argc, char *argv[]) {
         .closed = evclosed,
         .maxconns = maxconns,
     };
+    
+    // Cleanup performance config
+    if (perfconfig) {
+        perf_free_config(perfconfig);
+    }
+    
     net_main(&nopts);
     return 0;
 }

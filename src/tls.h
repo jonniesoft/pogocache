@@ -10,6 +10,9 @@
 #ifndef TLS_H
 #define TLS_H
 
+#include <unistd.h>  // For ssize_t
+#include <stddef.h>  // For size_t
+
 struct tls;
 
 void tls_init(void);

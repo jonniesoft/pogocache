@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <unistd.h>  // For ssize_t
 #include "args.h"
 
 #define NANOSECOND  INT64_C(1)

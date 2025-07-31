@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <unistd.h>  // For ssize_t
 #include "conn.h"
 #include "args.h"
 #include "buf.h"
