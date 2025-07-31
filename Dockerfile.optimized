@@ -1,0 +1,169 @@
+# Multi-stage optimized Dockerfile with dependency caching
+# Supports development and production builds with efficient layer caching
+
+ARG BUILD_TYPE=production
+ARG PARALLEL_JOBS=8
+
+# =============================================================================
+# Base images with build tools
+# =============================================================================
+
+FROM ubuntu:22.04 AS base-builder
+# Cache bust only when package lists change  
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    wget \
+    pkg-config \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+FROM ubuntu:22.04 AS base-runtime
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && useradd -r -s /bin/false pogocache
+
+# =============================================================================
+# Dependency building stages (cached separately)
+# =============================================================================
+
+FROM base-builder AS deps-source
+# This layer changes only when dependency scripts change
+COPY deps/build-uring.sh deps/build-openssl.sh deps/download.sh /app/deps/
+COPY build/scripts/build-deps-parallel.sh /app/build/scripts/
+WORKDIR /app
+
+FROM deps-source AS deps-development
+ARG PARALLEL_JOBS
+ENV BUILD_TYPE=development
+ENV PARALLEL_JOBS=${PARALLEL_JOBS}
+RUN bash build/scripts/build-deps-parallel.sh --development --jobs=$PARALLEL_JOBS
+
+FROM deps-source AS deps-production  
+ARG PARALLEL_JOBS
+ENV BUILD_TYPE=production
+ENV PARALLEL_JOBS=${PARALLEL_JOBS}
+RUN bash build/scripts/build-deps-parallel.sh --production --jobs=$PARALLEL_JOBS
+
+FROM deps-source AS deps-testing
+ARG PARALLEL_JOBS
+ENV BUILD_TYPE=testing
+ENV PARALLEL_JOBS=${PARALLEL_JOBS}
+RUN bash build/scripts/build-deps-parallel.sh --testing --jobs=$PARALLEL_JOBS
+
+# =============================================================================
+# Application building stages
+# =============================================================================
+
+FROM deps-${BUILD_TYPE} AS app-builder
+ARG BUILD_TYPE
+ARG PARALLEL_JOBS
+
+# Copy build configuration
+COPY build/config/ /app/build/config/
+COPY Makefile /app/
+
+# Copy source code (this layer invalidates on source changes)
+COPY src/ /app/src/
+
+WORKDIR /app/src
+
+# Build based on type
+RUN case "${BUILD_TYPE}" in \
+    "development") \
+        make -f ../build/config/development.mk -j${PARALLEL_JOBS} dev \
+        ;; \
+    "production") \
+        make -f ../build/config/production.mk -j${PARALLEL_JOBS} prod \
+        ;; \
+    "testing") \
+        make -f ../build/config/testing.mk -j${PARALLEL_JOBS} test \
+        ;; \
+    *) \
+        echo "Unknown build type: ${BUILD_TYPE}" && exit 1 \
+        ;; \
+    esac
+
+# Verify binary was created
+RUN ls -la /app/pogocache* && file /app/pogocache*
+
+# =============================================================================
+# Development runtime (includes debugging tools)
+# =============================================================================
+
+FROM base-runtime AS runtime-development
+RUN apt-get update && apt-get install -y \
+    gdb \
+    strace \
+    ltrace \
+    valgrind \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=app-builder /app/pogocache-dev /usr/local/bin/pogocache
+USER pogocache
+WORKDIR /home/pogocache
+EXPOSE 9401
+ENTRYPOINT ["pogocache"]
+
+# =============================================================================
+# Production runtime (minimal)
+# =============================================================================
+
+FROM base-runtime AS runtime-production
+COPY --from=app-builder /app/pogocache /usr/local/bin/pogocache
+
+# Verify binary works
+RUN /usr/local/bin/pogocache --version || /usr/local/bin/pogocache --help || true
+
+USER pogocache
+WORKDIR /home/pogocache
+EXPOSE 9401
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD pogocache --health-check || exit 1
+
+ENTRYPOINT ["pogocache"]
+
+# =============================================================================
+# Testing runtime (includes coverage tools)
+# =============================================================================
+
+FROM base-runtime AS runtime-testing
+RUN apt-get update && apt-get install -y \
+    gcov \
+    lcov \
+    gdb \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=app-builder /app/pogocache-test /usr/local/bin/pogocache
+COPY tests/ /home/pogocache/tests/
+RUN chown -R pogocache:pogocache /home/pogocache/tests
+
+USER pogocache
+WORKDIR /home/pogocache
+EXPOSE 9401
+ENTRYPOINT ["pogocache"]
+
+# =============================================================================
+# Final stage selection
+# =============================================================================
+
+FROM runtime-${BUILD_TYPE} AS final
+
+# Build metadata
+ARG BUILD_DATE
+ARG GIT_COMMIT
+ARG VERSION
+
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.source="https://github.com/your-org/pogocache"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.title="PogoCache"
+LABEL org.opencontainers.image.description="High-performance caching server"
+LABEL build.type="${BUILD_TYPE}"

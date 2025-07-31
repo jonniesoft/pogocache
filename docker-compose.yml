@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # Production deployment
+  pogocache:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+      cache_from:
+        - pogocache:latest
+        - pogocache:cache-deps
+        - pogocache:cache-source
+    image: pogocache:latest
+    container_name: pogocache-prod
+    restart: unless-stopped
+    ports:
+      - "9401:9401"
+    volumes:
+      - pogocache-data:/var/lib/pogocache
+      - pogocache-logs:/var/log/pogocache
+    environment:
+      - POGOCACHE_LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "pogocache", "--help"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - pogocache-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+
+  # Development deployment with debugging tools
+  pogocache-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: pogocache:dev
+    container_name: pogocache-dev
+    volumes:
+      - .:/workspace
+      - pogocache-dev-data:/var/lib/pogocache
+    ports:
+      - "9401:9401"
+      - "2345:2345"  # For remote debugging
+    environment:
+      - POGOCACHE_LOG_LEVEL=debug
+      - POGOCACHE_DEBUG=1
+    networks:
+      - pogocache-net
+    profiles:
+      - dev
+    tty: true
+    stdin_open: true
+
+  # Test runner
+  pogocache-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: source-builder
+    image: pogocache:test
+    container_name: pogocache-test
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: ["sh", "-c", "cd tests && ./run.sh"]
+    networks:
+      - pogocache-net
+    profiles:
+      - test
+
+volumes:
+  pogocache-data:
+    driver: local
+  pogocache-logs:
+    driver: local
+  pogocache-dev-data:
+    driver: local
+
+networks:
+  pogocache-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

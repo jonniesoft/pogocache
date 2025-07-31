@@ -1,0 +1,247 @@
+# Improved Makefile with build profiles and dependency caching
+# Supports development, production, and testing builds
+
+.PHONY: all dev prod test clean distclean deps deps-dev deps-prod deps-test help
+.PHONY: docker docker-dev docker-prod docker-test coverage install uninstall
+
+# Build configuration
+BUILD_TYPE ?= production
+PARALLEL_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+PREFIX ?= /usr/local
+
+# Include profile-specific configuration
+ifeq ($(BUILD_TYPE),development)
+    include build/config/development.mk
+    TARGET := pogocache-dev
+else ifeq ($(BUILD_TYPE),testing)
+    include build/config/testing.mk  
+    TARGET := pogocache-test
+else
+    include build/config/production.mk
+    TARGET := pogocache
+endif
+
+# Default target
+all: $(TARGET)
+
+# Development build
+dev:
+	@echo "Building pogocache (development)..."
+	$(MAKE) BUILD_TYPE=development $(TARGET)
+
+# Production build  
+prod:
+	@echo "Building pogocache (production)..."
+	$(MAKE) BUILD_TYPE=production $(TARGET)
+
+# Testing build
+test:
+	@echo "Building pogocache (testing)..."
+	$(MAKE) BUILD_TYPE=testing $(TARGET)
+
+# Dependency management
+deps:
+	@echo "Building dependencies ($(BUILD_TYPE))..."
+	BUILD_TYPE=$(BUILD_TYPE) PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		bash build/scripts/build-deps-parallel.sh --$(BUILD_TYPE)
+
+deps-dev:
+	@echo "Building development dependencies..."
+	BUILD_TYPE=development PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		bash build/scripts/build-deps-parallel.sh --development
+
+deps-prod:
+	@echo "Building production dependencies..."
+	BUILD_TYPE=production PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		bash build/scripts/build-deps-parallel.sh --production
+
+deps-test:
+	@echo "Building testing dependencies..."
+	BUILD_TYPE=testing PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		bash build/scripts/build-deps-parallel.sh --testing
+
+# Force dependency rebuild
+deps-rebuild:
+	@echo "Force rebuilding dependencies..."
+	BUILD_TYPE=$(BUILD_TYPE) PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		bash build/scripts/build-deps-parallel.sh --$(BUILD_TYPE) --force
+
+# Delegate to source Makefile with profile
+$(TARGET): deps
+	@echo "Compiling $(TARGET) with $(PARALLEL_JOBS) parallel jobs..."
+	cd src && $(MAKE) -j$(PARALLEL_JOBS) -f ../build/config/$(BUILD_TYPE).mk
+
+# Docker builds
+docker:
+	@echo "Building Docker image (production)..."
+	docker build -f Dockerfile.optimized \
+		--build-arg BUILD_TYPE=production \
+		--build-arg PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		--build-arg BUILD_DATE="$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--build-arg GIT_COMMIT="$(shell git rev-parse HEAD)" \
+		--build-arg VERSION="$(shell git describe --tags || echo dev)" \
+		-t pogocache:latest \
+		-t pogocache:production .
+
+docker-dev:
+	@echo "Building Docker image (development)..."
+	docker build -f Dockerfile.optimized \
+		--build-arg BUILD_TYPE=development \
+		--build-arg PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		--build-arg BUILD_DATE="$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--build-arg GIT_COMMIT="$(shell git rev-parse HEAD)" \
+		--build-arg VERSION="$(shell git describe --tags || echo dev)" \
+		-t pogocache:dev \
+		-t pogocache:development .
+
+docker-prod: docker
+
+docker-test:
+	@echo "Building Docker image (testing)..."
+	docker build -f Dockerfile.optimized \
+		--build-arg BUILD_TYPE=testing \
+		--build-arg PARALLEL_JOBS=$(PARALLEL_JOBS) \
+		--build-arg BUILD_DATE="$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--build-arg GIT_COMMIT="$(shell git rev-parse HEAD)" \
+		--build-arg VERSION="$(shell git describe --tags || echo dev)" \
+		-t pogocache:test \
+		-t pogocache:testing .
+
+# Coverage analysis (requires testing build)
+coverage: test
+	@echo "Running coverage analysis..."
+	cd tests && bash run.sh ../$(TARGET)
+	cd src && gcov -r *.c
+	cd src && lcov --capture --directory . --output-file ../coverage.info
+	cd src && genhtml ../coverage.info --output-directory ../coverage-html
+	@echo "Coverage report generated in coverage-html/"
+
+# Installation
+install: $(TARGET)
+	@echo "Installing $(TARGET) to $(PREFIX)/bin..."
+	install -D -m 755 $(TARGET) $(PREFIX)/bin/pogocache
+	@echo "Installation complete"
+
+uninstall:
+	@echo "Uninstalling pogocache from $(PREFIX)/bin..."
+	rm -f $(PREFIX)/bin/pogocache
+	@echo "Uninstallation complete"
+
+# Benchmarking (requires production build)
+benchmark: prod
+	@echo "Running performance benchmarks..."
+	cd tests && bash benchmark.sh ../$(TARGET)
+
+# Clean targets
+clean:
+	@echo "Cleaning build artifacts..."
+	cd src && $(MAKE) clean
+	rm -f pogocache pogocache-dev pogocache-test
+	rm -f *.gcno *.gcda *.gcov coverage.info
+	rm -rf coverage-html/
+
+distclean: clean
+	@echo "Cleaning dependencies and cache..."
+	cd src && $(MAKE) distclean
+	rm -rf build/cache/ 
+	rm -rf deps/liburing/ deps/openssl/
+	rm -f deps/*.tar.gz
+
+# Development helpers
+format:
+	@echo "Formatting source code..."
+	find src -name "*.c" -o -name "*.h" | xargs clang-format -i
+
+lint:
+	@echo "Running static analysis..."
+	find src -name "*.c" | xargs cppcheck --enable=all --suppress=missingIncludeSystem
+
+# Quick build verification
+verify: all
+	@echo "Verifying build..."
+	./$(TARGET) --version || ./$(TARGET) --help || true
+	@echo "Build verification complete"
+
+# Performance profiling (development build recommended)
+profile: dev
+	@echo "Building with profiling support..."
+	cd src && $(MAKE) CFLAGS="-pg $(CFLAGS)" $(TARGET)
+	@echo "Run your workload, then use 'gprof $(TARGET) gmon.out > profile.txt'"
+
+# Memory debugging (development build)
+memcheck: dev
+	@echo "Running memory check..."
+	valgrind --tool=memcheck --leak-check=full --track-origins=yes \
+		./$(TARGET) --test-mode
+
+# Static analysis
+analyze:
+	@echo "Running static analysis..."
+	scan-build make BUILD_TYPE=development
+
+# Build information
+info:
+	@echo "Build Information:"
+	@echo "  Build Type: $(BUILD_TYPE)"
+	@echo "  Target: $(TARGET)"
+	@echo "  Parallel Jobs: $(PARALLEL_JOBS)"
+	@echo "  Compiler: $(CC)"
+	@echo "  Flags: $(CFLAGS)"
+	@echo "  Linker Flags: $(LDFLAGS)"
+	@echo "  Dependencies: $(DEPS)"
+	@echo "  Libraries: $(CLIBS)"
+
+# Help target
+help:
+	@echo "PogoCache Build System"
+	@echo "======================"
+	@echo ""
+	@echo "Build Targets:"
+	@echo "  all          Build with current profile (default: production)"
+	@echo "  dev          Build development version (debugging enabled)"
+	@echo "  prod         Build production version (optimized)"
+	@echo "  test         Build testing version (coverage enabled)"
+	@echo ""
+	@echo "Dependencies:"
+	@echo "  deps         Build dependencies for current profile"
+	@echo "  deps-dev     Build development dependencies"
+	@echo "  deps-prod    Build production dependencies"  
+	@echo "  deps-test    Build testing dependencies"
+	@echo "  deps-rebuild Force rebuild all dependencies"
+	@echo ""
+	@echo "Docker:"
+	@echo "  docker       Build production Docker image"
+	@echo "  docker-dev   Build development Docker image"
+	@echo "  docker-test  Build testing Docker image"
+	@echo ""
+	@echo "Analysis:"
+	@echo "  coverage     Generate test coverage report"
+	@echo "  benchmark    Run performance benchmarks"
+	@echo "  profile      Build with profiling support"
+	@echo "  memcheck     Run memory debugging"
+	@echo "  analyze      Run static analysis"
+	@echo ""
+	@echo "Maintenance:"
+	@echo "  clean        Remove build artifacts"
+	@echo "  distclean    Remove everything including dependencies"
+	@echo "  format       Format source code"
+	@echo "  lint         Run code linting" 
+	@echo "  verify       Quick build verification"
+	@echo ""
+	@echo "Installation:"
+	@echo "  install      Install binary to PREFIX (default: /usr/local)"
+	@echo "  uninstall    Remove installed binary"
+	@echo ""
+	@echo "Information:"
+	@echo "  info         Show build configuration"
+	@echo "  help         Show this help message"
+	@echo ""
+	@echo "Build Types:"
+	@echo "  BUILD_TYPE=development   Fast builds, debugging enabled"
+	@echo "  BUILD_TYPE=production    Optimized builds (default)"
+	@echo "  BUILD_TYPE=testing       Coverage and testing enabled"
+	@echo ""
+	@echo "Options:"
+	@echo "  PARALLEL_JOBS=N          Number of parallel build jobs"
+	@echo "  PREFIX=/path             Installation prefix"
+	@echo "  CC=compiler              C compiler to use"

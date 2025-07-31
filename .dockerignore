@@ -1,0 +1,128 @@
+# Git and version control
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+
+# Documentation and markdown files (unless needed at runtime)
+*.md
+README*
+CHANGELOG*
+LICENSE*
+docs/
+examples/
+
+# Build artifacts and temporary files
+*.o
+*.a
+*.so
+*.dylib
+*.dSYM/
+*.out
+build/
+target/
+dist/
+bin/
+obj/
+
+# Compiled binary (will be built inside container)
+pogocache
+
+# Cache and temporary directories
+.cache/
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs and debugging
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# Test files and test results
+tests/
+test/
+*_test.go
+*.test
+coverage/
+.coverage
+htmlcov/
+
+# Development and CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+Jenkinsfile
+docker-compose*.yml
+.env*
+.envrc
+
+# Package manager files (not needed in Docker build)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Python specific (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Rust specific (if any)
+Cargo.lock
+target/
+
+# Go specific (if any - for tests)
+go.sum
+vendor/
+
+# Development tools and configs
+.editorconfig
+.prettierrc*
+.eslintrc*
+.stylintrc
+.tool-versions
+
+# Docker files themselves (avoid recursion)
+Dockerfile*
+.dockerignore
+
+# Runtime directories that will be created in container
+/var/lib/pogocache/
+/var/log/pogocache/
+
+# Coordination and memory files from Claude Flow
+coordination/
+memory/
+.swarm/
+claude-flow*
