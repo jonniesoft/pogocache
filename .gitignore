@@ -1,87 +1,18 @@
-# Build outputs
+# Minimal .gitignore - Only Critical Build Exclusions
+# This approach hides minimal information while protecting essentials
+
+# Build outputs (critical to exclude)
 pogocache
-pogocache-sani
 *.o
 *.a
-*.out
-*.dSYM
 gitinfo.h
-*.test
-*.data
-*.profraw
-*.profdata
-a.out
-test
-data/
 
-# Dependencies
+# Downloaded dependencies (too large for repo)
 deps/openssl/
 deps/liburing/
 deps/*.tar.gz
 
-# Development and AI assistance files (keep locally, exclude from production)
-.claude/
-.roo/
-.hive-mind/
-.swarm/
-.roomodes
-coordination/
-memory/
-CLAUDE.md
-claude-flow*
-.mcp.json
-
-# Development documentation (keep locally)
-BUILD_SYSTEM_SUMMARY.md
-PHASE1_VALIDATION_REPORT.md
-build-architecture.md
-build/
-
-# IDE and editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Security files
-*.pem
-*.key
-*.crt
-*.cer
-*.csr
-*.srl
-*.sock
-
-# Database files
-*.db
-*.db-journal
-*.db-wal
-*.sqlite
-*.sqlite-journal
-*.sqlite-wal
-*.work
-*.rdb
-
-# Temporary files
-*.tmp
-*.temp
-.tmp/
-hive-mind-prompt-*.txt
-
-# Test outputs
-test_results/
-coverage/
-
-# Cache files
-.cache/
-*.cache
+# Generated files
+*.dSYM/
+*.out
+a.out
